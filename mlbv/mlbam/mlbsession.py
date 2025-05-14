@@ -89,9 +89,14 @@ class MLBSession(session.Session):
             response = self.session.post(AUTHN_URL, json=authn_params)
             response.raise_for_status()
             authn_response = response.json()
-        except requests.RequestException as e:
-            LOG.error("Failed to reach Okta auth endpoint: %s", str(e))
-            raise session.SessionException("Could not contact authentication server.")
+        except requests.HTTPError as e:
+            if e.response.status_code == 401:
+                LOG.error("Authentication failed: Invalid username or password.")
+                raise session.SessionException("Invalid credentials for MLB account.")
+            else:
+                LOG.error("Failed to reach Okta auth endpoint: %s", str(e))
+                raise session.SessionException("Could not contact authentication server.")
+
 
         # Check for error response
         if "errorCode" in authn_response:
