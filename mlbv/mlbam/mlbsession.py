@@ -14,6 +14,7 @@ import hashlib
 import lxml
 import lxml.etree
 import pytz
+import requests
 
 import mlbv.mlbam.common.config as config
 import mlbv.mlbam.common.util as util
@@ -73,6 +74,7 @@ class MLBSession(session.Session):
         super().__init__(USER_AGENT, PLATFORM)
 
     def login(self):
+        """Logs in via Okta and stores session token."""
         authn_params = {
             "username": config.CONFIG.parser["username"],
             "password": config.CONFIG.parser["password"],
@@ -82,9 +84,32 @@ class MLBSession(session.Session):
             },
         }
         LOG.debug("login: %s", authn_params["username"])
-        authn_response = self.session.post(AUTHN_URL, json=authn_params).json()
-        LOG.debug("login: authn_response: %s", authn_response)
-        self.session_token = authn_response["sessionToken"]
+
+        try:
+            response = self.session.post(AUTHN_URL, json=authn_params)
+            response.raise_for_status()
+            authn_response = response.json()
+        except requests.RequestException as e:
+            LOG.error("Failed to reach Okta auth endpoint: %s", str(e))
+            raise session.SessionException("Could not contact authentication server.")
+
+        # Check for error response
+        if "errorCode" in authn_response:
+            error_summary = authn_response.get("errorSummary", "No summary provided")
+            LOG.error("Authentication failed: %s", error_summary)
+            raise session.SessionException(f"Authentication failed: {error_summary}")
+
+        # Expected status should be SUCCESS before sessionToken is issued
+        if authn_response.get("status") != "SUCCESS":
+            LOG.warning("Unexpected auth status: %s", authn_response.get("status"))
+            raise session.SessionException("Login did not return SUCCESS status.")
+
+        session_token = authn_response.get("sessionToken")
+        if not session_token:
+            LOG.error("No sessionToken found in authn response")
+            raise session.SessionException("Missing sessionToken in authn response.")
+
+        self.session_token = session_token
         self._state["session_token_time"] = str(datetime.datetime.now(tz=pytz.UTC))
         self.save()
 
