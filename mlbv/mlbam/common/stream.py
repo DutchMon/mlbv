@@ -5,6 +5,8 @@ Streaming functions
 import logging
 import os
 import subprocess
+import requests
+import re
 
 from datetime import datetime
 from datetime import timezone
@@ -21,7 +23,7 @@ def _has_game_started(start_time_utc):
     return start_time_utc.replace(timezone.utc) < datetime.now(timezone.utc)
 
 
-def _get_resolution():
+def _get_resolution(stream_url):
     """Workaround for Issue #12
     If resolution is 'best' then change it to '720p_alt'
     See https://github.com/streamlink/streamlink/issues/1048
@@ -33,6 +35,30 @@ def _get_resolution():
             "Workaround for issue #12: resolution 'best' is manually converted: %s",
             resolution,
         )
+
+    # Fetch master playlist
+    playlist_response = requests.get(stream_url)
+    playlist_lines = playlist_response.text.strip().splitlines()
+
+    max_resolution = 0
+
+    for i, line in enumerate(playlist_lines):
+        if line.startswith("#EXT-X-STREAM-INF"):
+            resolution_match = re.search(r'RESOLUTION=(\d+)x(\d+)', line)
+            frame_rate_match = re.search(r'FRAME-RATE=([\d.]+)', line)
+            if resolution_match:
+                stream_res = int(resolution_match.group(2))
+                frame_rate = float(frame_rate_match.group(1)) if frame_rate_match else 0.0
+
+                LOG.debug("Found stream: %d @ %.3f fps", stream_res, frame_rate)
+                if stream_res > max_resolution:
+                    max_resolution = stream_res
+                    resolution = str(stream_res) + "p"
+
+    if not max_resolution > 0:
+        LOG.warning("No stream variants found. Using master URL.")
+
+
     return resolution
 
 
@@ -122,7 +148,7 @@ def streamlink_highlight(playback_url, fetch_filename, is_multi_highlight=False)
         streamlink_cmd.append("--loglevel")
         streamlink_cmd.append("debug")
     streamlink_cmd.append(playback_url)
-    streamlink_cmd.append(_get_resolution())
+    streamlink_cmd.append(_get_resolution(playback_url))
 
     LOG.info("Playing highlight via streamlink: %s", str(streamlink_cmd))
     proc = subprocess.run(streamlink_cmd, check=False)
@@ -132,7 +158,7 @@ def streamlink_highlight(playback_url, fetch_filename, is_multi_highlight=False)
 
 
 def streamlink(
-    stream_url, mlb_session, fetch_filename=None, from_start=False, offset=None
+    stream_url, mlb_session, max_quality, fetch_filename=None, from_start=False, offset=None
 ):
     LOG.debug("Stream url: %s", stream_url)
     # media_auth_cookie_str = access_token
@@ -203,7 +229,8 @@ def streamlink(
         streamlink_cmd.append("--loglevel")
         streamlink_cmd.append("debug")
     streamlink_cmd.append(stream_url)
-    streamlink_cmd.append(_get_resolution())
+    # streamlink_cmd.append(_get_resolution())
+    streamlink_cmd.append(_get_resolution(stream_url))
 
     LOG.debug("Playing: %s", str(streamlink_cmd))
     proc = subprocess.run(streamlink_cmd, check=False)
