@@ -74,7 +74,8 @@ class MLBSession(session.Session):
         super().__init__(USER_AGENT, PLATFORM)
 
     def login(self):
-        """Logs in via Okta and stores session token."""
+        """Posts to the AUTHN_URL and saves the session token"""
+
         authn_params = {
             "username": config.CONFIG.parser["username"],
             "password": config.CONFIG.parser["password"],
@@ -254,7 +255,7 @@ class MLBSession(session.Session):
         return j['data']['contentSearch']['content']
 
     # Override
-    def lookup_stream_url(self, game_pk, media_id):
+    def lookup_stream_url(self, game_pk, media_id, no_evi):
         """game_pk: game_pk
         media_id: mediaPlaybackId
         """
@@ -303,6 +304,8 @@ class MLBSession(session.Session):
             LOG.error("Could not load stream\n%s", stream)
             return None
         stream_url = stream['data']['initPlaybackSession']['playback']['url']
+        if no_evi:
+            stream_url = re.sub("(/|-)(evi|EVI)", "", stream_url)
         return stream_url
 
     def _create_session(self):

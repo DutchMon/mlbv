@@ -75,7 +75,7 @@ def select_feed_for_team_new(game_feeds, team_code, feedtype=None):
 
     if not available_feeds:
         LOG.info("No video feeds available")
-        return None, None, None
+        return None, None, None, None
 
     for game_feed in available_feeds:
         # Ignore non-video
@@ -155,8 +155,10 @@ def play_stream(
     feedtype,
     date_str,
     fetch,
+    record,
     from_start,
     inning_ident,
+    no_evi,
     is_multi_highlight=False,
 ):
 #    import json
@@ -201,7 +203,7 @@ def play_stream(
         return 0
 
     # Authentication is triggered within here if necessary:
-    stream_url = mlb_session.lookup_stream_url(game_rec["game_pk"], media_playback_id)
+    stream_url = mlb_session.lookup_stream_url(game_rec["game_pk"], media_playback_id, no_evi)
     if stream_url is None:
         LOG.info("No game stream found for %s", team_to_play)
         return 0
@@ -212,8 +214,7 @@ def play_stream(
         mlb_session.save_playlist_to_file(stream_url)
     if inning_ident:
         offset = _calculate_inning_offset(
-            # inning_ident, media_state, media_playback_id, game_rec, milestones
-            inning_ident, media_state, milestones
+            inning_ident, media_state, milestones, game_rec
         )
         if offset is None:
             return 0  # already logged
@@ -225,8 +226,9 @@ def play_stream(
             game_rec["home"]["abbrev"],
             game_rec["away"]["abbrev"],
             feedtype,
-            fetch,
+            fetch or record,
         ),
+        record,
         from_start,
         offset,
     )
@@ -234,11 +236,17 @@ def play_stream(
 def _lookup_inning_timestamp_via_milestones(
     milestones, inning, inning_half="top", overwrite_json=True
 ):
-    broadcast_start = None
+    stream_start = None
     for milestone in milestones:
-        if milestone["milestoneType"] == "BROADCAST_START":
+        if milestone["milestoneType"] == "STREAM_START":
+            milestone_inning = False
+            stream_start_str = str(milestone["absoluteTime"])
+            stream_start = parser.parse(stream_start_str).timestamp()
+        elif milestone["milestoneType"] == "BROADCAST_START":
+            milestone_inning = "0"
+            milestone_inning_half = "top"
             broadcast_start_str = str(milestone["absoluteTime"])
-            broadcast_start = parser.parse(broadcast_start_str).timestamp()
+            broadcast_start = parser.parse(stream_start_str).timestamp()
         elif milestone["milestoneType"] == "INNING_START":
             milestone_inning = "1"
             milestone_inning_half = "top"
@@ -248,24 +256,27 @@ def _lookup_inning_timestamp_via_milestones(
                 elif str(keyword["name"]) == "top":
                     if str(keyword["value"]) != "true":
                         milestone_inning_half = "bottom"
-            if milestone_inning == inning and milestone_inning_half == inning_half:
-                # we found it
-                inning_start_timestamp_str = milestone["absoluteTime"]
-                inning_start_timestamp = parser.parse(
-                    inning_start_timestamp_str
-                ).timestamp()
-                LOG.info(
-                    "Found inning start: %s", inning_start_timestamp_str
-                )
-                LOG.debug("Milestone data: %s", str(milestone))
-                return (
-                    broadcast_start,
-                    inning_start_timestamp,
-                    inning_start_timestamp_str,
+        else:
+            continue
+
+        if milestone_inning == inning and milestone_inning_half == inning_half:
+            # we found it
+            inning_start_timestamp_str = milestone["absoluteTime"]
+            inning_start_timestamp = parser.parse(
+                inning_start_timestamp_str
+            ).timestamp()
+            LOG.info(
+                "Found inning start: %s", inning_start_timestamp_str
+            )
+            LOG.debug("Milestone data: %s", str(milestone))
+            return (
+                stream_start,
+                inning_start_timestamp,
+                inning_start_timestamp_str,
                 )
 
     LOG.warning("Could not locate '%s %s' inning", inning_half, inning)
-    return broadcast_start, None, None
+    return stream_start, None, None
 
 # def _lookup_inning_timestamp_via_airings(
 #     game_rec, media_playback_id, inning, inning_half="top", overwrite_json=True
@@ -324,13 +335,12 @@ def _lookup_inning_timestamp_via_milestones(
 #                                 inning_start_timestamp,
 #                                 inning_start_timestamp_str,
 #                             )
-
+#
 #     LOG.warning("Could not locate '%s %s' inning", inning_half, inning)
 #     return broadcast_start, None, None
 
 
-# def _calculate_inning_offset(inning_offset, media_state, media_playback_id, game_rec):
-def _calculate_inning_offset(inning_offset, media_state, milestones):
+def _calculate_inning_offset(inning_offset, media_state, milestones, game_rec):
     inning_half = "top"
     if inning_offset.startswith("b"):
         inning_half = "bottom"
@@ -342,8 +352,6 @@ def _calculate_inning_offset(inning_offset, media_state, milestones):
         broadcast_start_timestamp,
         inning_start_timestamp,
         inning_timestamp_str,
-    # ) = _lookup_inning_timestamp_via_airings(
-    #     game_rec, media_playback_id, inning, inning_half
     ) = _lookup_inning_timestamp_via_milestones(
         milestones, inning, inning_half
     )
@@ -359,7 +367,7 @@ def _calculate_inning_offset(inning_offset, media_state, milestones):
     # It is complicated by:
     #     - if stream is live then the offset is from the end of stream
     #     - if stream is archive then offset is from beginning of stream
-    if media_state == "MEDIA_ON":
+    if media_state == "ON":
         #     start          offset       endofstream
         #     |        | <----------------> |
         #            inning
