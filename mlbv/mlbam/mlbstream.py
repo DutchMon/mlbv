@@ -276,7 +276,7 @@ def _lookup_inning_timestamp_via_milestones(
                 )
 
     LOG.warning("Could not locate '%s %s' inning", inning_half, inning)
-    return stream_start, None, None
+    return stream_start, inning_start_timestamp, inning_start_timestamp_str
 
 # def _lookup_inning_timestamp_via_airings(
 #     game_rec, media_playback_id, inning, inning_half="top", overwrite_json=True

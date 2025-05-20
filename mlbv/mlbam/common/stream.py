@@ -158,7 +158,7 @@ def streamlink_highlight(playback_url, fetch_filename, is_multi_highlight=False)
 
 
 def streamlink(
-    stream_url, mlb_session, max_quality, fetch_filename=None, record=False, from_start=False, offset=None
+    stream_url, mlb_session, fetch_filename=None, record=False, from_start=False, offset=None
 ):
     LOG.debug("Stream url: %s", stream_url)
     # media_auth_cookie_str = access_token
