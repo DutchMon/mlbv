@@ -271,12 +271,13 @@ def _lookup_inning_timestamp_via_milestones(
             LOG.debug("Milestone data: %s", str(milestone))
             return (
                 stream_start,
+                stream_start_str,
                 inning_start_timestamp,
                 inning_start_timestamp_str,
                 )
 
     LOG.warning("Could not locate '%s %s' inning", inning_half, inning)
-    return stream_start, inning_start_timestamp, inning_start_timestamp_str
+    return stream_start, stream_start_str, inning_start_timestamp, inning_start_timestamp_str
 
 # def _lookup_inning_timestamp_via_airings(
 #     game_rec, media_playback_id, inning, inning_half="top", overwrite_json=True
@@ -350,6 +351,7 @@ def _calculate_inning_offset(inning_offset, media_state, milestones, game_rec):
         inning = inning_offset[-1]  # single digit inning
     (
         broadcast_start_timestamp,
+        broadcast_start_str,
         inning_start_timestamp,
         inning_timestamp_str,
     ) = _lookup_inning_timestamp_via_milestones(
@@ -397,7 +399,7 @@ def _calculate_inning_offset(inning_offset, media_state, milestones, game_rec):
         #         offset
         LOG.info(
             "Archive game: game start: %s, inning start: %s",
-            str(broadcast_start_timestamp),
+            broadcast_start_str,
             inning_timestamp_str,
         )
         offset_secs = inning_start_timestamp - broadcast_start_timestamp
