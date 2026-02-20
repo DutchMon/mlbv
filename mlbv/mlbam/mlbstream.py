@@ -238,6 +238,7 @@ def _lookup_inning_timestamp_via_milestones(
 ):
     stream_start = None
     for milestone in milestones:
+        LOG.info("Milestone data: %s", str(milestone))
         if milestone["milestoneType"] == "STREAM_START":
             milestone_inning = False
             stream_start_str = str(milestone["absoluteTime"])

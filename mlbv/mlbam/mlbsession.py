@@ -22,10 +22,11 @@ import mlbv.mlbam.common.session as session
 
 LOG = logging.getLogger(__name__)
 
-USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.13; rv:66.0) "
-    "Gecko/20100101 Firefox/66.0"
-)
+# USER_AGENT = (
+#     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.13; rv:66.0) "
+#     "Gecko/20100101 Firefox/66.0"
+# )
+USER_AGENT = "okhttp/3.12.1"
 
 PLATFORM = "macintosh"
 BAM_SDK_VERSION = "3.4"
@@ -91,6 +92,9 @@ class MLBSession(session.Session):
             response.raise_for_status()
             authn_response = response.json()
         except requests.HTTPError as e:
+            status = e.response.status_code if e.response is not None else None
+            body = e.response.text if e.response is not None else None
+            LOG.error("Authn error status=%s body=%s", status, body)
             if e.response.status_code == 401:
                 LOG.error("Authentication failed: Invalid username or password.")
                 raise session.SessionException("Invalid credentials for MLB account.")
