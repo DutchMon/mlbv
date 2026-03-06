@@ -41,9 +41,11 @@ def _get_resolution(stream_url):
     playlist_lines = playlist_response.text.strip().splitlines()
 
     max_resolution = 0
+    has_variant_streams = False
 
     for i, line in enumerate(playlist_lines):
         if line.startswith("#EXT-X-STREAM-INF"):
+            has_variant_streams = True
             resolution_match = re.search(r'RESOLUTION=(\d+)x(\d+)', line)
             frame_rate_match = re.search(r'FRAME-RATE=([\d.]+)', line)
             if resolution_match:
@@ -56,7 +58,16 @@ def _get_resolution(stream_url):
                     resolution = str(stream_res) + "p"
 
     if not max_resolution > 0:
-        LOG.warning("No stream variants found. Using master URL.")
+        if has_variant_streams:
+            # Audio-only playlists often omit RESOLUTION and expose bitrate variants.
+            # In that case Streamlink understands "best"/"worst" aliases.
+            resolution = "best"
+            LOG.warning(
+                "No video resolutions found in playlist. Falling back to stream selector: %s",
+                resolution,
+            )
+        else:
+            LOG.warning("No stream variants found. Using master URL.")
 
 
     return resolution
@@ -158,7 +169,13 @@ def streamlink_highlight(playback_url, fetch_filename, is_multi_highlight=False)
 
 
 def streamlink(
-    stream_url, mlb_session, fetch_filename=None, record=False, from_start=False, offset=None
+    stream_url,
+    mlb_session,
+    fetch_filename=None,
+    record=False,
+    from_start=False,
+    offset=None,
+    audio_only=False,
 ):
     LOG.debug("Stream url: %s", stream_url)
     # media_auth_cookie_str = access_token
@@ -206,6 +223,10 @@ def streamlink(
         LOG.debug("Using video_player: %s", video_player)
         streamlink_cmd.append("--player")
         streamlink_cmd.append(video_player)
+        if audio_only and video_player.strip().startswith("mpv"):
+            # Force a visible mpv window so keyboard controls (space for pause/play) are available.
+            streamlink_cmd.append("--player-args")
+            streamlink_cmd.append("--force-window=immediate")
         if config.CONFIG.parser.getboolean("streamlink_passthrough", False):
             streamlink_cmd.append("--player-passthrough=hls")
     if fetch_filename:

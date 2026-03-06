@@ -292,7 +292,9 @@ class MLBSession(session.Session):
             }
         }
 
-        response = self.session.post(MEDIA_GATEWAY_GRAPHQL_URL, json=playback_session_op, headers=headers)
+        response = self.session.post(
+            MEDIA_GATEWAY_GRAPHQL_URL, json=playback_session_op, headers=headers
+        )
 
         if response is not None and config.SAVE_JSON_FILE:
             output_filename = "stream"

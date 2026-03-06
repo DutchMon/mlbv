@@ -39,8 +39,9 @@ FEEDTYPE_MAP = {
     "in_market_home": "imh",
     "condensed": "cnd",
     "recap": "rcp",
-    # 'audio-away': 'aud-a',
-    # 'audio-home': 'aud-h',
+    "audio-away": "aud-a",
+    "audio-home": "aud-h",
+    "audio-national": "aud-nat",
 }
 
 
@@ -299,11 +300,20 @@ class GameDataRetriever:
             if "broadcasts" in game:
                 for broadcast in game["broadcasts"]:
                     feedtype = None
-                    if broadcast["type"] == "TV" and broadcast["availableForStreaming"]:
-                        if broadcast["isNational"]:
-                            feedtype = "national"
+                    if broadcast["availableForStreaming"]:
+                        if broadcast["type"] == "TV":
+                            if broadcast["isNational"]:
+                                feedtype = "national"
+                            else:
+                                feedtype = broadcast["homeAway"]
                         else:
-                            feedtype = broadcast["homeAway"]
+                            # Audio feeds are typically AM/FM (not just "RADIO").
+                            if broadcast["isNational"]:
+                                feedtype = "audio-national"
+                            else:
+                                feedtype = "audio-{}".format(
+                                    str(broadcast["homeAway"]).lower()
+                                )
                     if feedtype:
                         game_rec["feed"][feedtype] = dict()
 
@@ -453,30 +463,39 @@ class GameDatePresenter:
     """Formats game data for CLI output."""
 
     def __get_feeds_for_display(self, game_rec):
-        non_highlight_feeds = list()
+        tv_feeds = list()
+        radio_feeds = list()
+        highlight_feeds = list()
         use_short_feeds = config.CONFIG.parser.getboolean("use_short_feeds", True)
         for feed in sorted(game_rec["feed"].keys()):
-            if feed not in config.HIGHLIGHT_FEEDTYPES and not feed.startswith("audio-"):
+            if feed.startswith("audio-"):
                 if use_short_feeds:
-                    non_highlight_feeds.append(
-                        gamedata.convert_feedtype_to_short(feed, FEEDTYPE_MAP)
+                    feed_name = gamedata.convert_feedtype_to_short(
+                        feed.replace("audio-", ""), FEEDTYPE_MAP
                     )
                 else:
-                    non_highlight_feeds.append(feed)
-        highlight_feeds = list()
-        for feed in game_rec["feed"].keys():
-            if feed in config.HIGHLIGHT_FEEDTYPES and not feed.startswith("audio-"):
-                if use_short_feeds:
-                    highlight_feeds.append(
-                        gamedata.convert_feedtype_to_short(feed, FEEDTYPE_MAP)
-                    )
-                else:
-                    highlight_feeds.append(feed)
+                    feed_name = feed
+                radio_feeds.append(feed_name)
+                continue
+
+            if use_short_feeds:
+                feed_name = gamedata.convert_feedtype_to_short(feed, FEEDTYPE_MAP)
+            else:
+                feed_name = feed
+
+            if feed in config.HIGHLIGHT_FEEDTYPES:
+                highlight_feeds.append(feed_name)
+            else:
+                tv_feeds.append(feed_name)
+
+        tv_feed_str = ",".join(tv_feeds)
         if len(highlight_feeds) > 0:
-            return "{} {}".format(
-                ",".join(non_highlight_feeds), ",".join(highlight_feeds)
-            )
-        return "{}".format(",".join(non_highlight_feeds))
+            if tv_feed_str:
+                tv_feed_str = "{} {}".format(tv_feed_str, ",".join(highlight_feeds))
+            else:
+                tv_feed_str = ",".join(highlight_feeds)
+
+        return tv_feed_str, ",".join(radio_feeds)
 
     @staticmethod
     def _get_header(border, game_date, show_scores, show_linescore):
@@ -498,15 +517,22 @@ class GameDatePresenter:
                 )
             else:
                 header.append(
-                    "{:50} {:^7} {pipe} {:^5} {pipe} {:^9} {pipe} {}".format(
-                        date_hdr, "Series", "Score", "State", "Feeds", pipe=border.pipe
+                    "{:50} {:^7} {pipe} {:^5} {pipe} {:^9} {pipe} {:^10} {pipe} {}".format(
+                        date_hdr,
+                        "Series",
+                        "Score",
+                        "State",
+                        "TV Feeds",
+                        "Radio Feeds",
+                        pipe=border.pipe,
                     )
                 )
                 header.append(
-                    "{c_on}{}{pipe}{}{pipe}{}{pipe}{}{c_off}".format(
+                    "{c_on}{}{pipe}{}{pipe}{}{pipe}{}{pipe}{}{c_off}".format(
                         border.thickdash * 59,
                         border.thickdash * 7,
                         border.thickdash * 11,
+                        border.thickdash * 12,
                         border.thickdash * 16,
                         pipe=border.junction,
                         c_on=border.border_color,
@@ -515,14 +541,15 @@ class GameDatePresenter:
                 )
         else:
             header.append(
-                "{:50} {:^7} {pipe} {:^9} {pipe} {}".format(
-                    date_hdr, "Series", "State", "Feeds", pipe=border.pipe
+                "{:50} {:^7} {pipe} {:^9} {pipe} {:^10} {pipe} {}".format(
+                    date_hdr, "Series", "State", "TV Feeds", "Radio Feeds", pipe=border.pipe
                 )
             )
             header.append(
-                "{c_on}{}{pipe}{}{pipe}{}{c_off}".format(
+                "{c_on}{}{pipe}{}{pipe}{}{pipe}{}{c_off}".format(
                     border.thickdash * 59,
                     border.thickdash * 11,
+                    border.thickdash * 12,
                     border.thickdash * 16,
                     pipe=border.junction,
                     c_on=border.border_color,
@@ -745,10 +772,10 @@ class GameDatePresenter:
                     )
                 )
 
-                feeds = self.__get_feeds_for_display(game_rec)
-                if feeds:
-                    game_info_str = "{:7}Feeds: {feeds}".format(
-                        "", feeds=self.__get_feeds_for_display(game_rec)
+                tv_feeds, radio_feeds = self.__get_feeds_for_display(game_rec)
+                if tv_feeds or radio_feeds:
+                    game_info_str = "{:7}TV: {tv}  Radio: {radio}".format(
+                        "", tv=tv_feeds or "-", radio=radio_feeds or "-"
                     )
                     outl.append(
                         line_fmt.format(
@@ -773,8 +800,11 @@ class GameDatePresenter:
                     (
                         "{coloron}{ginfo:<50} {series:^7}{coloroff} "
                         "{pipe} {coloron}{score:^5}{coloroff} {pipe} "
-                        "{gscoloron}{gstate:<9}{gscoloroff} {pipe} {coloron}{feeds}{coloroff}"
+                        "{gscoloron}{gstate:<9}{gscoloroff} {pipe} {coloron}{tv_feeds:<10}{coloroff} "
+                        "{pipe} {coloron}{radio_feeds}{coloroff}"
                     ).format(
+                        tv_feeds=self.__get_feeds_for_display(game_rec)[0],
+                        radio_feeds=self.__get_feeds_for_display(game_rec)[1],
                         coloron=color_on,
                         coloroff=color_off,
                         ginfo=game_info_str,
@@ -783,7 +813,6 @@ class GameDatePresenter:
                         gscoloron=game_state_color_on,
                         gstate=game_state,
                         gscoloroff=game_state_color_off,
-                        feeds=self.__get_feeds_for_display(game_rec),
                         pipe=border.pipe,
                     )
                 )
@@ -791,14 +820,16 @@ class GameDatePresenter:
             outl.append(
                 (
                     "{coloron}{ginfo:<50} {series:^7}{coloroff} {pipe} "
-                    "{coloron}{gstate:^9}{coloroff} {pipe} {coloron}{feeds}{coloroff}"
+                    "{coloron}{gstate:^9}{coloroff} {pipe} {coloron}{tv_feeds:<10}{coloroff} "
+                    "{pipe} {coloron}{radio_feeds}{coloroff}"
                 ).format(
+                    tv_feeds=self.__get_feeds_for_display(game_rec)[0],
+                    radio_feeds=self.__get_feeds_for_display(game_rec)[1],
                     coloron=color_on,
                     coloroff=color_off,
                     ginfo=game_info_str,
                     series=series_info,
                     gstate=game_state,
-                    feeds=self.__get_feeds_for_display(game_rec),
                     pipe=border.pipe,
                 )
             )

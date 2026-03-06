@@ -259,6 +259,11 @@ def main():
         ),
     )
     parser.add_argument(
+        "--radio",
+        action="store_true",
+        help="Play radio/audio feed instead of video feed",
+    )
+    parser.add_argument(
         "--standings",
         nargs="?",
         const="division",
@@ -465,6 +470,8 @@ def main():
                         args.fetch,
                         None,
                         None,
+                        None,
+                        args.no_evi,
                         is_multi_highlight=True,
                     )
                 else:
@@ -519,7 +526,8 @@ def main():
         args.record,
         args.from_start,
         args.inning,
-	args.no_evi
+        args.no_evi,
+        args.radio,
     )
 
 

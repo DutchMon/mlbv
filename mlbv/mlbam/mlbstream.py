@@ -51,56 +51,58 @@ def select_feed_for_team(game_rec, team_code, feedtype=None):
     return None, None, None
 
 
-def select_feed_for_team_new(game_feeds, team_code, feedtype=None):
+def select_feed_for_team_new(game_feeds, team_code, feedtype=None, media_type="VIDEO"):
     found = None
     wanted_team_id = mlbapidata.get_team_id(team_code)
 
-    video_feeds = [x for x in game_feeds if x['mediaState']['mediaType'] == 'VIDEO']
+    typed_feeds = [
+        x
+        for x in game_feeds
+        if x.get("mediaState", {}).get("mediaType") == media_type
+    ]
 
-    if not video_feeds:
-        LOG.info("No video feeds returned")
-        return None, None, None
+    if not typed_feeds:
+        LOG.info("No %s feeds returned", media_type.lower())
+        return None, None, None, None
 
     available_feeds = []
 
-    for game_feed in video_feeds:
-        # Ignore non-video
-        if not game_feed['mediaState']['mediaType'] == 'VIDEO':
-            continue
-
+    for game_feed in typed_feeds:
         # Ignore feeds which are off
-        if game_feed['mediaState']['state'] == 'OFF':
+        if game_feed["mediaState"]["state"] == "OFF":
             continue
         available_feeds.append(game_feed)
 
     if not available_feeds:
-        LOG.info("No video feeds available")
+        LOG.info("No %s feeds available", media_type.lower())
         return None, None, None, None
 
+    desired_feedtype = feedtype.upper() if feedtype else None
+    if desired_feedtype and desired_feedtype.startswith("AUDIO-"):
+        desired_feedtype = desired_feedtype.split("-", 1)[1]
+
     for game_feed in available_feeds:
-        # Ignore non-video
-        if not game_feed['mediaState']['mediaType'] == 'VIDEO':
-            continue
-
         # Ignore feeds which are off
-        if game_feed['mediaState']['state'] == 'OFF':
+        if game_feed["mediaState"]["state"] == "OFF":
             continue
 
-        if feedtype:
-            if feedtype.upper() == game_feed['feedType']:
+        if desired_feedtype:
+            if desired_feedtype == game_feed["feedType"]:
                 found = game_feed
                 break
         else:
             if (
-                game_feed['feedType'] == 'AWAY' and
-                dict(name='AwayTeamId', value=str(wanted_team_id)) in game_feed.get('fields', [])
+                game_feed["feedType"] == "AWAY"
+                and dict(name="AwayTeamId", value=str(wanted_team_id))
+                in game_feed.get("fields", [])
             ):
                 found = game_feed
                 break
 
             if (
-                game_feed['feedType'] == 'HOME' and
-                dict(name='HomeTeamId', value=str(wanted_team_id)) in game_feed.get('fields', [])
+                game_feed["feedType"] == "HOME"
+                and dict(name="HomeTeamId", value=str(wanted_team_id))
+                in game_feed.get("fields", [])
             ):
                 found = game_feed
                 break
@@ -109,7 +111,12 @@ def select_feed_for_team_new(game_feeds, team_code, feedtype=None):
         # the prefered feed doesn't exist so pick the first available one
         found = available_feeds[0]
 
-    return found['mediaId'], found['mediaState']['state'], found['contentId'], found['milestones']
+    return (
+        found["mediaId"],
+        found["mediaState"]["state"],
+        found.get("contentId"),
+        found.get("milestones", []),
+    )
 
 
 def find_highlight_url_for_team(game_rec, feedtype):
@@ -159,6 +166,7 @@ def play_stream(
     from_start,
     inning_ident,
     no_evi,
+    radio=False,
     is_multi_highlight=False,
 ):
 #    import json
@@ -195,15 +203,18 @@ def play_stream(
 
     game_content = mlb_session.get_game_content(game_pk)
     # print(game_content)
+    media_type = "AUDIO" if radio else "VIDEO"
     media_playback_id, media_state, content_id, milestones = select_feed_for_team_new(
-        game_content, team_to_play, feedtype
+        game_content, team_to_play, feedtype, media_type=media_type
     )
     if media_playback_id is None:
-        LOG.error("No stream URL found")
+        LOG.error("No %s stream URL found", media_type.lower())
         return 0
 
     # Authentication is triggered within here if necessary:
-    stream_url = mlb_session.lookup_stream_url(game_rec["game_pk"], media_playback_id, no_evi)
+    stream_url = mlb_session.lookup_stream_url(
+        game_rec["game_pk"], media_playback_id, no_evi
+    )
     if stream_url is None:
         LOG.info("No game stream found for %s", team_to_play)
         return 0
@@ -212,7 +223,9 @@ def play_stream(
     offset = None
     if config.SAVE_PLAYLIST_FILE:
         mlb_session.save_playlist_to_file(stream_url)
-    if inning_ident:
+    if inning_ident and radio:
+        LOG.warning("Ignoring --inning for radio/audio streams")
+    elif inning_ident:
         offset = _calculate_inning_offset(
             inning_ident, media_state, milestones, game_rec
         )
@@ -231,6 +244,7 @@ def play_stream(
         record,
         from_start,
         offset,
+        radio,
     )
 
 def _lookup_inning_timestamp_via_milestones(
